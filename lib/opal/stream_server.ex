@@ -5,6 +5,11 @@ defmodule Opal.StreamServer do
 
   require Logger
 
+  @default_opts [
+    index: Opal.BTree.new(max_node_length: 1024),
+    index_period_bytes: 100,
+  ]
+
   def start_link(opts) do
     stream_id = Keyword.fetch!(opts, :stream_id)
     GenServer.start_link(__MODULE__, opts, [name: {:global, stream_id}])
@@ -16,9 +21,11 @@ defmodule Opal.StreamServer do
     stream_dir = Path.join(database, stream_id)
     File.mkdir_p(stream_dir)
 
-    index = Keyword.get(opts, :index, Opal.BTree.new())
+    opts = Keyword.merge(@default_opts, opts)
 
-    index_period_bytes = Keyword.get(opts, :index_period_bytes, 100)
+    index = Keyword.fetch!(opts, :index)
+
+    index_period_bytes = Keyword.fetch!(opts, :index_period_bytes)
     {:ok, %{stream_dir: stream_dir, index: index, last_index_position: 0, current_position: 0, current_seqnum: 0, index_period_bytes: index_period_bytes}}
   end
 
