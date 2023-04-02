@@ -1,6 +1,8 @@
 defmodule Opal.StreamServer do
   use GenServer
 
+  alias Opal.Index
+
   require Logger
 
   def start_link(opts) do
@@ -14,8 +16,10 @@ defmodule Opal.StreamServer do
     stream_dir = Path.join(database, stream_id)
     File.mkdir_p(stream_dir)
 
+    index = Keyword.get(opts, :index, Opal.BTree.new())
+
     index_period_bytes = Keyword.get(opts, :index_period_bytes, 100)
-    {:ok, %{stream_dir: stream_dir, index: [], last_index_position: 0, current_position: 0, current_seqnum: 0, index_period_bytes: index_period_bytes}}
+    {:ok, %{stream_dir: stream_dir, index: index, last_index_position: 0, current_position: 0, current_seqnum: 0, index_period_bytes: index_period_bytes}}
   end
 
   def store(stream_id, event) do
@@ -34,13 +38,10 @@ defmodule Opal.StreamServer do
 
 
     {indexed_seq, indexed_offset} =
-      Enum.reduce_while(state.index, {1, 0}, fn {next_seq, next_offset}, {prev_seq, prev_offset} ->
-        if next_seq > seq do
-          {:halt, {prev_seq, prev_offset}}
-        else
-          {:cont, {next_seq, next_offset}}
-        end
-      end)
+      case Index.get_closest_before(state.index, seq) do
+        nil -> {1, 0}
+        val -> val
+      end
 
     # Logger.debug(seq: seq, indexed_seq: indexed_seq, indexed_offset: indexed_offset)
 
@@ -82,9 +83,7 @@ defmodule Opal.StreamServer do
 
   def handle_continue(:update_index, state) do
     state =
-      Map.update!(state, :index, fn index ->
-        index ++ [{state.current_seqnum + 1, state.current_position}]
-      end)
+      Map.update!(state, :index, &Index.put(&1, state.current_seqnum + 1, state.current_position))
       |> Map.put(:last_index_position, state.current_position)
 
     {:noreply, state}
