@@ -5,6 +5,20 @@ defmodule Opal.StreamServer do
 
   require Logger
 
+  @enforce_keys [
+    :stream_dir,
+    :index,
+    :index_period_bytes
+  ]
+  defstruct [
+    :stream_dir,
+    :index,
+    :index_period_bytes,
+    last_index_position: 0,
+    current_position: 0,
+    current_seqnum: 0,
+  ]
+
   @default_opts [
     index: Opal.BTree.new(max_node_length: 1024),
     index_period_bytes: 100,
@@ -26,7 +40,7 @@ defmodule Opal.StreamServer do
     index = Keyword.fetch!(opts, :index)
 
     index_period_bytes = Keyword.fetch!(opts, :index_period_bytes)
-    {:ok, %{stream_dir: stream_dir, index: index, last_index_position: 0, current_position: 0, current_seqnum: 0, index_period_bytes: index_period_bytes}}
+    {:ok, %__MODULE__{stream_dir: stream_dir, index: index, index_period_bytes: index_period_bytes}}
   end
 
   def store(stream_id, event) do
@@ -40,7 +54,7 @@ defmodule Opal.StreamServer do
     end
   end
 
-  def handle_call({:read, seq}, _from, state) do
+  def handle_call({:read, seq}, _from, %__MODULE__{} = state) do
     events_file_path = Path.join(state.stream_dir, "events")
 
 
@@ -69,7 +83,7 @@ defmodule Opal.StreamServer do
     {:reply, event, state}
   end
 
-  def handle_call({:store, event}, _from, state) do
+  def handle_call({:store, event}, _from, %__MODULE__{} = state) do
     events_file_path = Path.join(state.stream_dir, "events")
 
     {:ok, :ok} = File.open(events_file_path, [:append], fn file ->
@@ -88,7 +102,7 @@ defmodule Opal.StreamServer do
     end
   end
 
-  def handle_continue(:update_index, state) do
+  def handle_continue(:update_index, %__MODULE__{} = state) do
     state =
       Map.update!(state, :index, &Index.put(&1, state.current_seqnum + 1, state.current_position))
       |> Map.put(:last_index_position, state.current_position)
