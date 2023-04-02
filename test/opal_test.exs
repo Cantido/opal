@@ -29,4 +29,16 @@ defmodule OpalTest do
 
     {:ok, "five"} = Opal.read(stream_id, 5)
   end
+
+  @tag :tmp_dir
+  test "stores values with newlines", %{tmp_dir: dir} do
+    stream_id = "newlinetest"
+
+    {:ok, _pid} = start_supervised({Opal.StreamServer, database: dir, stream_id: stream_id})
+
+    :ok = Opal.store(stream_id, "one\nand")
+    :ok = Opal.store(stream_id, "two")
+
+    {:ok, "two"} = Opal.read(stream_id, 2)
+  end
 end

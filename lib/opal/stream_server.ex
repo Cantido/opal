@@ -19,11 +19,14 @@ defmodule Opal.StreamServer do
   end
 
   def store(stream_id, event) do
+    event = Base.encode64(to_string(event))
     GenServer.call({:global, stream_id}, {:store, event})
   end
 
   def read(stream_id, seq) do
-    GenServer.call({:global, stream_id}, {:read, seq})
+    with {:ok, event} <- GenServer.call({:global, stream_id}, {:read, seq}) do
+      Base.decode64(event)
+    end
   end
 
   def handle_call({:read, seq}, _from, state) do
@@ -59,7 +62,6 @@ defmodule Opal.StreamServer do
   end
 
   def handle_call({:store, event}, _from, state) do
-    event = to_string(event)
     events_file_path = Path.join(state.stream_dir, "events")
 
     {:ok, :ok} = File.open(events_file_path, [:append], fn file ->
