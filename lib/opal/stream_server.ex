@@ -15,7 +15,7 @@ defmodule Opal.StreamServer do
     File.mkdir_p(stream_dir)
 
     index_period_bytes = Keyword.get(opts, :index_period_bytes, 100)
-    {:ok, %{stream_dir: stream_dir, index: [], last_index_position: 0, current_position: 0, index_period_bytes: index_period_bytes}}
+    {:ok, %{stream_dir: stream_dir, index: [], last_index_position: 0, current_position: 0, current_seqnum: 0, index_period_bytes: index_period_bytes}}
   end
 
   def store(stream_id, event) do
@@ -67,7 +67,9 @@ defmodule Opal.StreamServer do
     end)
 
     state =
-      Map.update(state, :current_position, byte_size(event), &(&1 + byte_size(event) + 1))
+      state
+      |> Map.update(:current_position, byte_size(event), &(&1 + byte_size(event) + 1))
+      |> Map.update(:current_seqnum, 1, &(&1 + 1))
 
     if (state.current_position - state.last_index_position) > state.index_period_bytes do
       {:reply, :ok, state, {:continue, :update_index}}
@@ -77,17 +79,9 @@ defmodule Opal.StreamServer do
   end
 
   def handle_continue(:update_index, state) do
-    events_file_path = Path.join(state.stream_dir, "events")
-
-
     state =
       Map.update!(state, :index, fn index ->
-        event_count =
-          File.stream!(events_file_path, [], :line)
-          # |> tap(&Logger.debug([event_stream: Enum.to_list(&1)]))
-          |> Enum.count()
-#          Logger.debug("Indexed at #{event_count + 1}, offset #{stat.size}")
-        index ++ [{event_count + 1, state.current_position}]
+        index ++ [{state.current_seqnum + 1, state.current_position}]
       end)
       |> Map.put(:last_index_position, state.current_position)
 
