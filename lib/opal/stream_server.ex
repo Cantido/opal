@@ -8,12 +8,14 @@ defmodule Opal.StreamServer do
   @enforce_keys [
     :stream_dir,
     :index,
-    :index_period_bytes
+    :index_period_bytes,
+    :device
   ]
   defstruct [
     :stream_dir,
     :index,
     :index_period_bytes,
+    :device,
     last_index_position: 0,
     current_position: 0,
     current_seqnum: 0,
@@ -40,7 +42,12 @@ defmodule Opal.StreamServer do
     index = Keyword.fetch!(opts, :index)
 
     index_period_bytes = Keyword.fetch!(opts, :index_period_bytes)
-    {:ok, %__MODULE__{stream_dir: stream_dir, index: index, index_period_bytes: index_period_bytes}}
+    {:ok, %__MODULE__{
+      stream_dir: stream_dir,
+      index: index,
+      index_period_bytes: index_period_bytes,
+      device: File.open!(Path.join(stream_dir, "events"), [:utf8, :read, :append])
+    }}
   end
 
   def store(stream_id, event) do
@@ -55,9 +62,6 @@ defmodule Opal.StreamServer do
   end
 
   def handle_call({:read, seq}, _from, %__MODULE__{} = state) do
-    events_file_path = Path.join(state.stream_dir, "events")
-
-
     {indexed_seq, indexed_offset} =
       case Index.get_closest_before(state.index, seq) do
         nil -> {1, 0}
@@ -66,29 +70,24 @@ defmodule Opal.StreamServer do
 
     # Logger.debug(seq: seq, indexed_seq: indexed_seq, indexed_offset: indexed_offset)
 
+    {:ok, _newpos} = :file.position(state.device, indexed_offset)
     event =
-      File.open(events_file_path, [:read], fn file ->
-        {:ok, _newpos} = :file.position(file, indexed_offset)
-        event =
-          file
-          |> IO.stream(:line)
-          |> Enum.at(seq - indexed_seq)
-        if is_nil(event) do
-          nil
-        else
-          String.trim_trailing(event)
-        end
-      end)
+      state.device
+      |> IO.stream(:line)
+      |> Enum.at(seq - indexed_seq)
 
-    {:reply, event, state}
+    event =
+      if is_nil(event) do
+        nil
+      else
+        String.trim_trailing(event)
+      end
+
+    {:reply, {:ok, event}, state}
   end
 
   def handle_call({:store, event}, _from, %__MODULE__{} = state) do
-    events_file_path = Path.join(state.stream_dir, "events")
-
-    {:ok, :ok} = File.open(events_file_path, [:append], fn file ->
-      IO.puts(file, event)
-    end)
+    IO.puts(state.device, event)
 
     state =
       state
@@ -108,5 +107,9 @@ defmodule Opal.StreamServer do
       |> Map.put(:last_index_position, state.current_position)
 
     {:noreply, state}
+  end
+
+  def terminate(_reason, %__MODULE__{} = state) do
+    File.close(state.device)
   end
 end
