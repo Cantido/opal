@@ -7,37 +7,41 @@ defmodule Opal.BTree do
     }
   end
 
-  def put(%__MODULE__{is_leaf: true} = tree, key, value) do
-    if index = Enum.find(tree.children, &(elem(&1, 0) == key)) do
-      children = List.replace_at(tree.children, index, {key, value})
+  def put(%__MODULE__{} = tree, key, value) do
+    update(tree, key, value, fn _ -> value end)
+  end
+
+  def update(%__MODULE__{is_leaf: true} = tree, key, default, fun) do
+    if index = Enum.find_index(tree.children, &(elem(&1, 0) == key)) do
+      children = List.update_at(tree.children, index, fn {key, value} -> {key, fun.(value)} end)
       %__MODULE__{tree | children: children}
     else
       if Enum.count(tree.children) >= tree.max_node_length do
         tree
         |> split()
-        |> put(key, value)
+        |> update(key, default, fun)
       else
-        child = {key, value}
+        child = {key, default}
         children = Enum.sort_by([child | tree.children], &elem(&1, 0))
         %__MODULE__{tree | children: children}
       end
     end
   end
 
-  def put(%__MODULE__{is_leaf: false} = tree, key, value) do
+  def update(%__MODULE__{is_leaf: false} = tree, key, default, fun) do
     insert_at_position = find_child_index(tree, key)
 
     if is_nil(insert_at_position) do
       raise "nil position for child found in a non-leaf node"
     end
 
-    children = List.update_at(tree.children, insert_at_position, &put(&1, key, value))
+    children = List.update_at(tree.children, insert_at_position, &update(&1, key, default, fun))
 
     %__MODULE__{tree | children: children}
   end
 
-  def put({key, _value}, key, value) do
-    {key, value}
+  def update({key, value}, key, _default, fun) do
+    {key, fun.(value)}
   end
 
   defp split(%__MODULE__{} = tree) do

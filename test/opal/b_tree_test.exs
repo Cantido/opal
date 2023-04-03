@@ -12,6 +12,15 @@ defmodule Opal.BTreeTest do
     assert result == "asdf"
   end
 
+  test "update" do
+    tree =
+      BTree.new()
+      |> BTree.put("key1", ["first"])
+      |> BTree.update("key1", nil, &["second" | &1])
+
+    assert BTree.get(tree, "key1") == ["second", "first"]
+  end
+
   test "put and get multiple values" do
     tree =
       BTree.new(max_node_length: 5)
