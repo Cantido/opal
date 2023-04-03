@@ -29,20 +29,6 @@ defmodule OpalTest do
     assert is_nil(actual)
   end
 
-  @tag :tmp_dir
-  test "can look up events by source and id", %{tmp_dir: dir} do
-    stream_id = "eventlookup"
-
-    {:ok, _pid} = start_supervised({Opal.StreamServer, database: dir, stream_id: stream_id})
-
-    event = event_fixture()
-    :ok = Opal.store(stream_id, event)
-
-    {:ok, actual} = Opal.find(stream_id, event.source, event.id)
-
-    assert event.id == actual.id
-  end
-
   describe "query/2" do
     @tag :tmp_dir
     test "can make a query matching a type", %{tmp_dir: dir} do

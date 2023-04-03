@@ -79,12 +79,6 @@ defmodule Opal.StreamServer do
     end
   end
 
-  def find(stream_id, source, id) do
-    with {:ok, row} <- GenServer.call({:global, stream_id}, {:find, source, id}) do
-      deserialize_row(row)
-    end
-  end
-
   def query(stream_id, query) do
     GenServer.call({:global, stream_id}, {:query, query})
   end

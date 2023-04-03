@@ -29,10 +29,6 @@ defmodule Opal do
     Opal.StreamServer.read(stream_id, seq)
   end
 
-  def find(stream_id, source, id) do
-    Opal.StreamServer.find(stream_id, source, id)
-  end
-
   def query(stream_id, params) do
     Opal.StreamServer.query(stream_id, params)
   end
