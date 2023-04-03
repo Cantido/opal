@@ -54,4 +54,23 @@ defmodule OpalTest do
 
     assert second.id == actual.id
   end
+
+  @tag :tmp_dir
+  test "can get stream metrics", %{tmp_dir: dir} do
+    stream_id = "streammetrics"
+
+    {:ok, _pid} = start_supervised({Opal.StreamServer, database: dir, stream_id: stream_id})
+
+    :ok = Opal.store(stream_id, event_fixture())
+    :ok = Opal.store(stream_id, event_fixture())
+    :ok = Opal.store(stream_id, event_fixture())
+    :ok = Opal.store(stream_id, event_fixture())
+    :ok = Opal.store(stream_id, event_fixture())
+    :ok = Opal.store(stream_id, event_fixture())
+
+    metrics = Opal.stream_metrics(stream_id)
+
+    assert metrics.current_revision == 6
+    assert metrics.byte_size > 0
+  end
 end

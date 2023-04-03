@@ -63,6 +63,10 @@ defmodule Opal.StreamServer do
     end
   end
 
+  def metrics(stream_id) do
+    GenServer.call({:global, stream_id}, :metrics)
+  end
+
   def handle_call({:read, seq}, _from, %__MODULE__{} = state) do
     {indexed_seq, indexed_offset} =
       case Index.get_closest_before(state.index, seq) do
@@ -101,6 +105,15 @@ defmodule Opal.StreamServer do
     else
       {:reply, :ok, state}
     end
+  end
+
+  def handle_call(:metrics, _from, %__MODULE__{} = state) do
+    metrics = %{
+      byte_size: state.current_position,
+      current_revision: state.current_seqnum
+    }
+
+    {:reply, metrics, state}
   end
 
   def handle_continue(:update_index, %__MODULE__{} = state) do
