@@ -59,16 +59,27 @@ defmodule Opal.StreamServer do
   end
 
   def read(stream_id, seq) do
-    with {:ok, event} <- GenServer.call({:global, stream_id}, {:read, seq}),
-         {:ok, event} <- Base.decode64(event) do
-      Cloudevents.from_json(event)
+    with {:ok, row} <- GenServer.call({:global, stream_id}, {:read, seq}) do
+      deserialize_row(row)
+    end
+  end
+
+  defp deserialize_row(nil) do
+    {:ok, nil}
+  end
+
+  defp deserialize_row(row) do
+    case Base.decode64(String.trim_trailing(row)) do
+      {:ok, event} ->
+        Cloudevents.from_json(event)
+      err ->
+        err
     end
   end
 
   def find(stream_id, source, id) do
-    with {:ok, event} <- GenServer.call({:global, stream_id}, {:find, source, id}),
-         {:ok, event} <- Base.decode64(event) do
-      Cloudevents.from_json(event)
+    with {:ok, row} <- GenServer.call({:global, stream_id}, {:find, source, id}) do
+      deserialize_row(row)
     end
   end
 
@@ -90,13 +101,6 @@ defmodule Opal.StreamServer do
       state.device
       |> IO.stream(:line)
       |> Enum.at(seq - indexed_seq)
-
-    event =
-      if is_nil(event) do
-        nil
-      else
-        String.trim_trailing(event)
-      end
 
     {:reply, {:ok, event}, state}
   end
@@ -124,13 +128,6 @@ defmodule Opal.StreamServer do
         state.device
         |> IO.stream(:line)
         |> Enum.at(0)
-
-      event =
-        if is_nil(event) do
-          nil
-        else
-          String.trim_trailing(event)
-        end
 
       {:reply, {:ok, event}, state}
     else

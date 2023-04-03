@@ -19,6 +19,17 @@ defmodule OpalTest do
   end
 
   @tag :tmp_dir
+  test "looking up a nonexistent revision number returns nil", %{tmp_dir: dir} do
+    stream_id = "nonexistentrevision"
+
+    {:ok, _pid} = start_supervised({Opal.StreamServer, database: dir, stream_id: stream_id})
+
+    {:ok, actual} = Opal.read(stream_id, 1)
+
+    assert is_nil(actual)
+  end
+
+  @tag :tmp_dir
   test "can look up events by source and id", %{tmp_dir: dir} do
     stream_id = "eventlookup"
 
