@@ -19,13 +19,13 @@ defmodule Opal.StreamServer do
     secondary_indices: [],
     last_index_position: 0,
     current_position: 0,
-    current_seqnum: 0,
+    current_rownum: 0,
   ]
 
   @default_opts [
     primary_index: Opal.BTree.new(max_node_length: 1024),
     secondary_indices: %{
-      {:source, :id} => Opal.BTree.new(max_node_length: 1024)
+      [:source, :id] => Opal.BTree.new(max_node_length: 1024)
     },
     index_period_bytes: 100,
   ]
@@ -85,25 +85,16 @@ defmodule Opal.StreamServer do
     end
   end
 
+  def query(stream_id, query) do
+    GenServer.call({:global, stream_id}, {:query, query})
+  end
+
   def metrics(stream_id) do
     GenServer.call({:global, stream_id}, :metrics)
   end
 
   def handle_call({:read, seq}, _from, %__MODULE__{} = state) do
-    {indexed_seq, indexed_offset} =
-      case Index.get_closest_before(state.primary_index, seq) do
-        nil -> {1, 0}
-        val -> val
-      end
-
-    # Logger.debug(seq: seq, indexed_seq: indexed_seq, indexed_offset: indexed_offset)
-
-    {:ok, _newpos} = :file.position(state.device, indexed_offset)
-    event =
-      state.device
-      |> IO.stream(:line)
-      |> Enum.at(seq - indexed_seq)
-
+    event = get_row(seq - 1, state)
     {:reply, {:ok, event}, state}
   end
 
@@ -111,38 +102,74 @@ defmodule Opal.StreamServer do
     encoded_event = Base.encode64(Cloudevents.to_json(event))
     IO.puts(state.device, encoded_event)
 
-    event_offset = state.current_position
+    event_row_index = state.current_rownum
 
     state =
       state
-      |> Map.update(:current_position, byte_size(encoded_event), &(&1 + byte_size(encoded_event) + 1))
-      |> Map.update(:current_seqnum, 1, &(&1 + 1))
+      |> Map.update!(:current_position, &(&1 + byte_size(encoded_event) + 1))
+      |> Map.update!(:current_rownum, &(&1 + 1))
 
-    {:reply, :ok, state, {:continue, {:update_indices, event, event_offset}}}
+    {:reply, :ok, state, {:continue, {:update_indices, event, event_row_index}}}
   end
 
   def handle_call({:find, source, id}, _from, %__MODULE__{} = state) do
     {:ok, _newpos} = :file.position(state.device, :bof)
 
-    index = Map.get(state.secondary_indices, {:source, :id})
+    index = Map.get(state.secondary_indices, [:source, :id])
 
-    if offset = Index.get(index, source <> "\0" <> id) do
-      {:ok, _newpos} = :file.position(state.device, offset)
-      event =
-        state.device
-        |> IO.stream(:line)
-        |> Enum.at(0)
-
-      {:reply, {:ok, event}, state}
+    event =
+    if rownum = Index.get(index, source <> "\0" <> id) do
+      get_row(rownum, state)
     else
-      {:reply, {:ok, nil}, state}
+      nil
     end
+
+    {:reply, {:ok, event}, state}
+  end
+
+  def handle_call({:query, query}, _from, %__MODULE__{} = state) do
+    relevant_indices = find_relevant_indices(state.secondary_indices, Map.keys(query))
+
+    rows_to_scan =
+      if Enum.any?(relevant_indices) do
+        Enum.map(relevant_indices, fn {index_attributes, index} ->
+          index_key = form_index_binary_key(index_attributes, query)
+          MapSet.new(List.wrap(Index.get(index, index_key)))
+        end)
+        |> Enum.reduce(fn rowset, rowacc ->
+          MapSet.intersection(rowset, rowacc)
+        end)
+        |> Enum.to_list()
+        |> Enum.sort()
+      else
+        if state.current_rownum == 0 do
+          []
+        else
+          0..(state.current_rownum - 1)
+        end
+      end
+
+    matching_events =
+      Stream.map(rows_to_scan, fn row_index ->
+        {:ok, event} =
+          get_row(row_index, state)
+          |> deserialize_row()
+        event
+      end)
+      |> Stream.filter(fn event ->
+        Enum.all?(query, fn {key, value} ->
+          Map.get(event, key) == value
+        end)
+      end)
+      |> Enum.to_list()
+
+    {:reply, {:ok, matching_events}, state}
   end
 
   def handle_call(:metrics, _from, %__MODULE__{} = state) do
     metrics = %{
       byte_size: state.current_position,
-      current_revision: state.current_seqnum
+      row_count: state.current_rownum
     }
 
     {:reply, metrics, state}
@@ -157,26 +184,57 @@ defmodule Opal.StreamServer do
     {:noreply, state}
   end
 
+  defp get_row(rownum, state) do
+    {indexed_rownum, indexed_offset} =
+      case Index.get_closest_before(state.primary_index, rownum) do
+        nil -> {0, 0}
+        val -> val
+      end
+
+    {:ok, _newpos} = :file.position(state.device, indexed_offset)
+
+    state.device
+    |> IO.stream(:line)
+    |> Enum.at(rownum - indexed_rownum)
+  end
+
+  # Returns all indices whose attributes are all requested in the query.
+  defp find_relevant_indices(indices, query_attributes) do
+    query_attr_set = MapSet.new(query_attributes)
+
+    Map.filter(indices, fn {index_attributes, _index} ->
+      index_attr_set = MapSet.new(index_attributes)
+
+      MapSet.subset?(index_attr_set, query_attr_set)
+    end)
+  end
+
   defp update_primary_index(%__MODULE__{} = state) do
     if (state.current_position - state.last_index_position) > state.index_period_bytes do
-      Map.update!(state, :primary_index, &Index.put(&1, state.current_seqnum + 1, state.current_position))
+      Map.update!(state, :primary_index, &Index.put(&1, state.current_rownum, state.current_position))
       |> Map.put(:last_index_position, state.current_position)
     else
       state
     end
   end
 
-  defp update_secondary_indices(%__MODULE__{} = state, event, offset) do
+  defp update_secondary_indices(%__MODULE__{} = state, event, rownum) do
     secondary_indices =
       Map.new(state.secondary_indices, fn {event_fields, index} ->
         case event_fields do
-          {:source, :id} ->
-            key = event.source <> "\0" <> event.id
-            {event_fields, Index.put(index, key, offset)}
+          [:source, :id] ->
+            key = form_index_binary_key([:source, :id], event)
+            {event_fields, Index.put(index, key, rownum)}
         end
       end)
 
     %__MODULE__{state | secondary_indices: secondary_indices}
+  end
+
+  defp form_index_binary_key(attribute_list, attribute_source) do
+    Enum.map_join(attribute_list, "\0", fn attribute_key ->
+      Map.get(attribute_source, attribute_key)
+    end)
   end
 
   def terminate(_reason, %__MODULE__{} = state) do

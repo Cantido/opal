@@ -43,6 +43,53 @@ defmodule OpalTest do
     assert event.id == actual.id
   end
 
+  describe "query/2" do
+    @tag :tmp_dir
+    test "can make a query matching a type", %{tmp_dir: dir} do
+      stream_id = "eventquerytype"
+
+      {:ok, _pid} = start_supervised({Opal.StreamServer, database: dir, stream_id: stream_id})
+
+      event = event_fixture()
+      :ok = Opal.store(stream_id, event)
+
+      {:ok, events} = Opal.query(stream_id, %{type: event.type})
+
+      [actual] = events
+      assert event.id == actual.id
+    end
+
+    @tag :tmp_dir
+    test "can make a query matching multiple attributes with no index", %{tmp_dir: dir} do
+      stream_id = "eventquerytypesource"
+
+      {:ok, _pid} = start_supervised({Opal.StreamServer, database: dir, stream_id: stream_id})
+
+      event = event_fixture()
+      :ok = Opal.store(stream_id, event)
+
+      {:ok, events} = Opal.query(stream_id, %{type: event.type, source: event.source})
+
+      [actual] = events
+      assert event.id == actual.id
+    end
+
+    @tag :tmp_dir
+    test "can make a query matching multiple attributes with an index", %{tmp_dir: dir} do
+      stream_id = "eventquerysourceid"
+
+      {:ok, _pid} = start_supervised({Opal.StreamServer, database: dir, stream_id: stream_id})
+
+      event = event_fixture()
+      :ok = Opal.store(stream_id, event)
+
+      {:ok, events} = Opal.query(stream_id, %{source: event.source, id: event.id})
+
+      [actual] = events
+      assert event.id == actual.id
+    end
+  end
+
   @tag :tmp_dir
   test "can write multiple events", %{tmp_dir: dir} do
     stream_id = "multipleevents"
@@ -95,7 +142,7 @@ defmodule OpalTest do
 
     metrics = Opal.stream_metrics(stream_id)
 
-    assert metrics.current_revision == 6
+    assert metrics.row_count == 6
     assert metrics.byte_size > 0
   end
 end

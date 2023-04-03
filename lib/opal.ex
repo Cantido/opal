@@ -33,6 +33,10 @@ defmodule Opal do
     Opal.StreamServer.find(stream_id, source, id)
   end
 
+  def query(stream_id, params) do
+    Opal.StreamServer.query(stream_id, params)
+  end
+
   def stream_metrics(stream_id) do
     Opal.StreamServer.metrics(stream_id)
   end

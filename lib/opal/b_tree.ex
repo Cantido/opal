@@ -107,7 +107,7 @@ defmodule Opal.BTree do
   end
 
   def get_closest_before({key, value}, key) do
-    value
+    {key, value}
   end
 
   defimpl Opal.Index do
