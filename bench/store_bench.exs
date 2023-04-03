@@ -6,13 +6,14 @@ defmodule StoreBench do
 
   setup_all do
     Application.ensure_all_started(:opal)
+    Opal.delete_stream_data(@db_dir, @stream_id)
     {:ok, pid} = Opal.start_stream(@db_dir, @stream_id)
   end
 
   teardown_all _pid do
     metrics = Opal.stream_metrics(@stream_id)
 
-    Map.put(metrics, :average_event_size, metrics.byte_size / metrics.current_revision)
+    Map.put(metrics, :average_event_size, metrics.byte_size / metrics.row_count)
     |> IO.inspect(pretty: true, label: "Stream metrics")
 
     Opal.stop_stream(@stream_id)

@@ -11,6 +11,9 @@ defmodule QueryBench do
 
   setup_all do
     Application.ensure_all_started(:opal)
+
+    Opal.delete_stream_data(@db_dir, @stream_id)
+
     {:ok, stream_pid} = Opal.start_stream(@db_dir, @stream_id)
 
     for _i <- 1..@records_count do

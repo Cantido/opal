@@ -4,10 +4,13 @@ defmodule ReadBench do
   @db_dir "tmp/read_bench"
   @stream_id "read_bench"
 
-  @records_count 100_000
+  @records_count 10_000
 
   setup_all do
     Application.ensure_all_started(:opal)
+
+    Opal.delete_stream_data(@db_dir, @stream_id)
+
     {:ok, stream_pid} = Opal.start_stream(@db_dir, @stream_id)
 
     for _i <- 1..@records_count do
