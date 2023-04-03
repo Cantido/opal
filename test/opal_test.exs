@@ -47,7 +47,7 @@ defmodule OpalTest do
   test "can write multiple events", %{tmp_dir: dir} do
     stream_id = "multipleevents"
 
-    {:ok, _pid} = start_supervised({Opal.StreamServer, database: dir, stream_id: stream_id, index_period_bytes: 10})
+    {:ok, _pid} = start_supervised({Opal.StreamServer, database: dir, stream_id: stream_id})
 
     five = event_fixture()
 

@@ -7,24 +7,26 @@ defmodule Opal.StreamServer do
 
   @enforce_keys [
     :stream_dir,
-    :index,
+    :primary_index,
     :index_period_bytes,
     :device
   ]
   defstruct [
     :stream_dir,
-    :index,
-    :source_id_index,
+    :primary_index,
     :index_period_bytes,
     :device,
+    secondary_indices: [],
     last_index_position: 0,
     current_position: 0,
     current_seqnum: 0,
   ]
 
   @default_opts [
-    index: Opal.BTree.new(max_node_length: 1024),
-    source_id_index: Opal.BTree.new(max_node_length: 1024),
+    primary_index: Opal.BTree.new(max_node_length: 1024),
+    secondary_indices: %{
+      {:source, :id} => Opal.BTree.new(max_node_length: 1024)
+    },
     index_period_bytes: 100,
   ]
 
@@ -42,13 +44,13 @@ defmodule Opal.StreamServer do
 
     opts = Keyword.merge(@default_opts, opts)
 
-    index = Keyword.fetch!(opts, :index)
+    index = Keyword.fetch!(opts, :primary_index)
 
     index_period_bytes = Keyword.fetch!(opts, :index_period_bytes)
     {:ok, %__MODULE__{
       stream_dir: stream_dir,
-      index: index,
-      source_id_index: Keyword.fetch!(opts, :source_id_index),
+      primary_index: index,
+      secondary_indices: Keyword.fetch!(opts, :secondary_indices),
       index_period_bytes: index_period_bytes,
       device: File.open!(Path.join(stream_dir, "events"), [:utf8, :read, :append])
     }}
@@ -89,7 +91,7 @@ defmodule Opal.StreamServer do
 
   def handle_call({:read, seq}, _from, %__MODULE__{} = state) do
     {indexed_seq, indexed_offset} =
-      case Index.get_closest_before(state.index, seq) do
+      case Index.get_closest_before(state.primary_index, seq) do
         nil -> {1, 0}
         val -> val
       end
@@ -122,7 +124,9 @@ defmodule Opal.StreamServer do
   def handle_call({:find, source, id}, _from, %__MODULE__{} = state) do
     {:ok, _newpos} = :file.position(state.device, :bof)
 
-    if offset = Index.get(state.source_id_index, source <> "\0" <> id) do
+    index = Map.get(state.secondary_indices, {:source, :id})
+
+    if offset = Index.get(index, source <> "\0" <> id) do
       {:ok, _newpos} = :file.position(state.device, offset)
       event =
         state.device
@@ -148,24 +152,31 @@ defmodule Opal.StreamServer do
     state =
       state
       |> update_primary_index()
-      |> update_source_id_index(last_event, last_offset)
+      |> update_secondary_indices(last_event, last_offset)
 
     {:noreply, state}
   end
 
   defp update_primary_index(%__MODULE__{} = state) do
     if (state.current_position - state.last_index_position) > state.index_period_bytes do
-      Map.update!(state, :index, &Index.put(&1, state.current_seqnum + 1, state.current_position))
+      Map.update!(state, :primary_index, &Index.put(&1, state.current_seqnum + 1, state.current_position))
       |> Map.put(:last_index_position, state.current_position)
     else
       state
     end
   end
 
-  defp update_source_id_index(%__MODULE__{} = state, event, offset) do
-    key = event.source <> "\0" <> event.id
+  defp update_secondary_indices(%__MODULE__{} = state, event, offset) do
+    secondary_indices =
+      Map.new(state.secondary_indices, fn {event_fields, index} ->
+        case event_fields do
+          {:source, :id} ->
+            key = event.source <> "\0" <> event.id
+            {event_fields, Index.put(index, key, offset)}
+        end
+      end)
 
-    Map.update!(state, :source_id_index, &Index.put(&1, key, offset))
+    %__MODULE__{state | secondary_indices: secondary_indices}
   end
 
   def terminate(_reason, %__MODULE__{} = state) do
