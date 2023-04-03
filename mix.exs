@@ -28,7 +28,7 @@ defmodule Opal.MixProject do
     [
       {:benchfella, "~> 0.3.0"},
       {:cloudevents, "~> 0.6.1"},
-      {:uniq, "~> 0.5.4", only: :test}
+      {:uniq, "~> 0.5.4"}
     ]
   end
 end
