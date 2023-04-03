@@ -122,5 +122,9 @@ defmodule Opal.BTree do
     def get_closest_before(tree, key) do
       Opal.BTree.get_closest_before(tree, key)
     end
+
+    def update(tree, key, default, fun) do
+      Opal.BTree.update(tree, key, default, fun)
+    end
   end
 end
