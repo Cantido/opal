@@ -22,7 +22,9 @@ defmodule Opal.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:benchfella, "~> 0.3.0"}
+      {:benchfella, "~> 0.3.0"},
+      {:uniq, "~> 0.5.4", only: :test},
+      {:stream_data, "~> 0.5", only: :test}
     ]
   end
 end

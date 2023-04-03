@@ -3,8 +3,13 @@ defmodule Opal do
   Documentation for `Opal`.
   """
 
-  def start_stream(database, stream_id) do
-    DynamicSupervisor.start_child(Opal.StreamServerSupervisor, {Opal.StreamServer, database: database, stream_id: stream_id})
+  def start_stream(database, stream_id, opts \\ []) do
+    opts =
+      opts
+      |> Keyword.put(:database, database)
+      |> Keyword.put(:stream_id, stream_id)
+
+    DynamicSupervisor.start_child(Opal.StreamServerSupervisor, {Opal.StreamServer, opts})
   end
 
   def stop_stream(stream_id) do

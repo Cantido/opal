@@ -11,7 +11,7 @@ defmodule ReadBench do
     {:ok, stream_pid} = Opal.start_stream(@db_dir, @stream_id)
 
     for i <- 1..@records_count do
-      Opal.store(@stream_id, i)
+      Opal.store(@stream_id, to_string(i))
     end
 
     {:ok, stream_pid}

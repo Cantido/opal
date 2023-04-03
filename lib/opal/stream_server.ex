@@ -32,6 +32,7 @@ defmodule Opal.StreamServer do
   end
 
   def init(opts) do
+
     stream_id = Keyword.fetch!(opts, :stream_id)
     database = Keyword.fetch!(opts, :database)
     stream_dir = Path.join(database, stream_id)
@@ -50,8 +51,8 @@ defmodule Opal.StreamServer do
     }}
   end
 
-  def store(stream_id, event) do
-    event = Base.encode64(to_string(event))
+  def store(stream_id, event) when is_binary(event) do
+    event = Base.encode64(event)
     GenServer.call({:global, stream_id}, {:store, event})
   end
 
