@@ -56,7 +56,8 @@ defmodule Opal.StreamServer do
   end
 
   def store(stream_id, event) do
-    GenServer.call({:global, stream_id}, {:store, event})
+    encoded_event = Base.encode64(Cloudevents.to_json(event))
+    GenServer.call({:global, stream_id}, {:store, event, encoded_event})
   end
 
   def read(stream_id, seq) do
@@ -95,8 +96,7 @@ defmodule Opal.StreamServer do
     {:reply, {:ok, event}, state}
   end
 
-  def handle_call({:store, event}, _from, %__MODULE__{} = state) do
-    encoded_event = Base.encode64(Cloudevents.to_json(event))
+  def handle_call({:store, event, encoded_event}, _from, %__MODULE__{} = state) do
     IO.puts(state.device, encoded_event)
 
     event_row_index = state.current_rownum
