@@ -83,6 +83,10 @@ defmodule Opal.StreamServer do
     GenServer.call({:global, stream_id}, {:query, query})
   end
 
+  def explain(stream_id, query) do
+    GenServer.call({:global, stream_id}, {:explain, query})
+  end
+
   def metrics(stream_id) do
     GenServer.call({:global, stream_id}, :metrics)
   end
@@ -122,29 +126,9 @@ defmodule Opal.StreamServer do
   end
 
   def handle_call({:query, query}, _from, %__MODULE__{} = state) do
-    relevant_indices = find_relevant_indices(state.secondary_indices, Map.keys(query))
-
-    rows_to_scan =
-      if Enum.any?(relevant_indices) do
-        Enum.map(relevant_indices, fn {index_attributes, index} ->
-          index_key = form_index_binary_key(index_attributes, query)
-          MapSet.new(List.wrap(Index.get(index, index_key)))
-        end)
-        |> Enum.reduce(fn rowset, rowacc ->
-          MapSet.intersection(rowset, rowacc)
-        end)
-        |> Enum.to_list()
-        |> Enum.sort()
-      else
-        if state.current_rownum == 0 do
-          []
-        else
-          0..(state.current_rownum - 1)
-        end
-      end
-
     matching_events =
-      Stream.map(rows_to_scan, fn row_index ->
+      plan(query, state)
+      |> Stream.map(fn row_index ->
         {:ok, event} =
           get_row(row_index, state)
           |> deserialize_row()
@@ -158,6 +142,14 @@ defmodule Opal.StreamServer do
       |> Enum.to_list()
 
     {:reply, {:ok, matching_events}, state}
+  end
+
+  def handle_call({:explain, query}, _from, %__MODULE__{} = state) do
+    plan = %{
+      row_count: Enum.count(plan(query, state))
+    }
+
+    {:reply, {:ok, plan}, state}
   end
 
   def handle_call(:metrics, _from, %__MODULE__{} = state) do
@@ -176,6 +168,28 @@ defmodule Opal.StreamServer do
       |> update_secondary_indices(last_event, last_offset)
 
     {:noreply, state}
+  end
+
+  defp plan(query, state) do
+    relevant_indices = find_relevant_indices(state.secondary_indices, Map.keys(query))
+
+    if Enum.any?(relevant_indices) do
+      Enum.map(relevant_indices, fn {index_attributes, index} ->
+        index_key = form_index_binary_key(index_attributes, query)
+        MapSet.new(List.wrap(Index.get(index, index_key)))
+      end)
+      |> Enum.reduce(fn rowset, rowacc ->
+        MapSet.intersection(rowset, rowacc)
+      end)
+      |> Enum.to_list()
+      |> Enum.sort()
+    else
+      if state.current_rownum == 0 do
+        []
+      else
+        0..(state.current_rownum - 1)
+      end
+    end
   end
 
   defp get_row(rownum, state) do

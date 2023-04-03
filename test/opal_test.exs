@@ -131,4 +131,45 @@ defmodule OpalTest do
     assert metrics.row_count == 6
     assert metrics.byte_size > 0
   end
+
+  describe "explain/2" do
+    @tag :tmp_dir
+    test "can explain a query that will only hit indices, and has a match", %{tmp_dir: dir} do
+      stream_id = "explainwithindex"
+
+      {:ok, _pid} = start_supervised({Opal.StreamServer, database: dir, stream_id: stream_id})
+
+      target = event_fixture()
+
+      :ok = Opal.store(stream_id, event_fixture())
+      :ok = Opal.store(stream_id, event_fixture())
+      :ok = Opal.store(stream_id, event_fixture())
+      :ok = Opal.store(stream_id, target)
+      :ok = Opal.store(stream_id, event_fixture())
+      :ok = Opal.store(stream_id, event_fixture())
+      :ok = Opal.store(stream_id, event_fixture())
+
+      {:ok, plan} = Opal.explain(stream_id, %{source: target.source, id: target.id})
+
+      assert plan.row_count == 1
+    end
+
+    @tag :tmp_dir
+    test "can explain a query that will not hit indices", %{tmp_dir: dir} do
+      stream_id = "explainwithoutindex"
+
+      {:ok, _pid} = start_supervised({Opal.StreamServer, database: dir, stream_id: stream_id})
+
+      :ok = Opal.store(stream_id, event_fixture())
+      :ok = Opal.store(stream_id, event_fixture())
+      :ok = Opal.store(stream_id, event_fixture())
+      :ok = Opal.store(stream_id, event_fixture())
+      :ok = Opal.store(stream_id, event_fixture())
+      :ok = Opal.store(stream_id, event_fixture())
+
+      {:ok, plan} = Opal.explain(stream_id, %{type: "Hello :)"})
+
+      assert plan.row_count == 6
+    end
+  end
 end

@@ -36,4 +36,8 @@ defmodule Opal do
   def stream_metrics(stream_id) do
     Opal.StreamServer.metrics(stream_id)
   end
+
+  def explain(stream_id, query) do
+    Opal.StreamServer.explain(stream_id, query)
+  end
 end
