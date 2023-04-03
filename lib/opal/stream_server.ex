@@ -36,7 +36,6 @@ defmodule Opal.StreamServer do
   end
 
   def init(opts) do
-
     stream_id = Keyword.fetch!(opts, :stream_id)
     database = Keyword.fetch!(opts, :database)
     stream_dir = Path.join(database, stream_id)
@@ -53,7 +52,7 @@ defmodule Opal.StreamServer do
       secondary_indices: Keyword.fetch!(opts, :secondary_indices),
       index_period_bytes: index_period_bytes,
       device: File.open!(Path.join(stream_dir, "events"), [:utf8, :read, :append])
-    }}
+    }, {:continue, :build_indices}}
   end
 
   def store(stream_id, event) do
@@ -159,6 +158,24 @@ defmodule Opal.StreamServer do
     }
 
     {:reply, metrics, state}
+  end
+
+  def handle_continue(:build_indices, %__MODULE__{} = state) do
+    state =
+      state.device
+      |> IO.stream(:line)
+      |> Enum.reduce(state, fn encoded_event, state ->
+        {:ok, last_event} = deserialize_row(encoded_event)
+        last_offset = state.current_position
+
+        state
+        |> Map.update!(:current_position, &(&1 + byte_size(encoded_event) + 1))
+        |> Map.update!(:current_rownum, &(&1 + 1))
+        |> update_primary_index()
+        |> update_secondary_indices(last_event, last_offset)
+      end)
+
+    {:noreply, state}
   end
 
   def handle_continue({:update_indices, last_event, last_offset}, %__MODULE__{} = state) do

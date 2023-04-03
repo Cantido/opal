@@ -29,6 +29,31 @@ defmodule OpalTest do
     assert is_nil(actual)
   end
 
+  @tag :tmp_dir
+  test "rebuilds index when restarted with an existing database", %{tmp_dir: dir} do
+    stream_id = "rebuildsindex"
+
+    Opal.start_stream(dir, stream_id)
+
+    target = event_fixture()
+
+    :ok = Opal.store(stream_id, event_fixture())
+    :ok = Opal.store(stream_id, event_fixture())
+    :ok = Opal.store(stream_id, event_fixture())
+    :ok = Opal.store(stream_id, target)
+    :ok = Opal.store(stream_id, event_fixture())
+    :ok = Opal.store(stream_id, event_fixture())
+    :ok = Opal.store(stream_id, event_fixture())
+
+
+    Opal.stop_stream(stream_id)
+    Opal.start_stream(dir, stream_id)
+
+    {:ok, plan} = Opal.explain(stream_id, %{source: target.source, id: target.id})
+
+    assert plan.row_count == 1
+  end
+
   describe "query/2" do
     @tag :tmp_dir
     test "can make a query matching a type", %{tmp_dir: dir} do
