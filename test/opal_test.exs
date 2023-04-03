@@ -19,6 +19,20 @@ defmodule OpalTest do
   end
 
   @tag :tmp_dir
+  test "can look up events by source and id", %{tmp_dir: dir} do
+    stream_id = "eventlookup"
+
+    {:ok, _pid} = start_supervised({Opal.StreamServer, database: dir, stream_id: stream_id})
+
+    event = event_fixture()
+    :ok = Opal.store(stream_id, event)
+
+    {:ok, actual} = Opal.find(stream_id, event.source, event.id)
+
+    assert event.id == actual.id
+  end
+
+  @tag :tmp_dir
   test "can write multiple events", %{tmp_dir: dir} do
     stream_id = "multipleevents"
 

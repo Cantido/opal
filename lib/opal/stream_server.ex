@@ -63,6 +63,10 @@ defmodule Opal.StreamServer do
     end
   end
 
+  def find(stream_id, source, id) do
+    GenServer.call({:global, stream_id}, {:find, source, id})
+  end
+
   def metrics(stream_id) do
     GenServer.call({:global, stream_id}, :metrics)
   end
@@ -105,6 +109,25 @@ defmodule Opal.StreamServer do
     else
       {:reply, :ok, state}
     end
+  end
+
+  def handle_call({:find, source, id}, _from, %__MODULE__{} = state) do
+    {:ok, _newpos} = :file.position(state.device, :bof)
+
+    event =
+      state.device
+      |> IO.stream(:line)
+      |> Stream.map(fn line ->
+        line
+        |> String.trim_trailing()
+        |> Base.decode64!()
+        |> Cloudevents.from_json!()
+      end)
+      |> Enum.find(fn event ->
+        event.source == source and event.id == id
+      end)
+
+    {:reply, {:ok, event}, state}
   end
 
   def handle_call(:metrics, _from, %__MODULE__{} = state) do
