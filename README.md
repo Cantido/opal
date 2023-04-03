@@ -2,8 +2,8 @@
 
 Opal is an event database optimized for event sourcing.
 
-The event sourcing technique gives several requirements a system's event store
-that allow for optimizations over traditional databases:
+The event sourcing technique gives several requirements to a system's event
+store that allow for optimizations over traditional databases:
 
 - Events are strictly ordered in the sequence that they came in
 - Events are frequently referenced by their sequence number, or by ranges of sequence numbers
