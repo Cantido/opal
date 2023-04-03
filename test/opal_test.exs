@@ -2,15 +2,20 @@ defmodule OpalTest do
   use ExUnit.Case
   doctest Opal
 
+  import Opal.StoreFixtures
+
   @tag :tmp_dir
   test "writes events to file", %{tmp_dir: dir} do
     stream_id = "writeseventstofiletest"
 
     {:ok, _pid} = start_supervised({Opal.StreamServer, database: dir, stream_id: stream_id})
 
-    :ok = Opal.store(stream_id, "hello")
+    event = event_fixture()
+    :ok = Opal.store(stream_id, event)
 
-    {:ok, "hello"} = Opal.read(stream_id, 1)
+    {:ok, actual} = Opal.read(stream_id, 1)
+
+    assert event.id == actual.id
   end
 
   @tag :tmp_dir
@@ -19,15 +24,19 @@ defmodule OpalTest do
 
     {:ok, _pid} = start_supervised({Opal.StreamServer, database: dir, stream_id: stream_id, index_period_bytes: 10})
 
-    :ok = Opal.store(stream_id, "one")
-    :ok = Opal.store(stream_id, "two")
-    :ok = Opal.store(stream_id, "three")
-    :ok = Opal.store(stream_id, "four")
-    :ok = Opal.store(stream_id, "five")
-    :ok = Opal.store(stream_id, "six")
-    :ok = Opal.store(stream_id, "seven")
+    five = event_fixture()
 
-    {:ok, "five"} = Opal.read(stream_id, 5)
+    :ok = Opal.store(stream_id, event_fixture())
+    :ok = Opal.store(stream_id, event_fixture())
+    :ok = Opal.store(stream_id, event_fixture())
+    :ok = Opal.store(stream_id, event_fixture())
+    :ok = Opal.store(stream_id, five)
+    :ok = Opal.store(stream_id, event_fixture())
+    :ok = Opal.store(stream_id, event_fixture())
+
+    {:ok, actual} = Opal.read(stream_id, 5)
+
+    assert five.id == actual.id
   end
 
   @tag :tmp_dir
@@ -36,9 +45,13 @@ defmodule OpalTest do
 
     {:ok, _pid} = start_supervised({Opal.StreamServer, database: dir, stream_id: stream_id})
 
-    :ok = Opal.store(stream_id, "one\nand")
-    :ok = Opal.store(stream_id, "two")
+    second = event_fixture()
 
-    {:ok, "two"} = Opal.read(stream_id, 2)
+    :ok = Opal.store(stream_id, event_fixture(data: "\n"))
+    :ok = Opal.store(stream_id, second)
+
+    {:ok, actual} = Opal.read(stream_id, 2)
+
+    assert second.id == actual.id
   end
 end

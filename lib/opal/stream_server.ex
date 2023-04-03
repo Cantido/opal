@@ -51,14 +51,15 @@ defmodule Opal.StreamServer do
     }}
   end
 
-  def store(stream_id, event) when is_binary(event) do
-    event = Base.encode64(event)
+  def store(stream_id, event) do
+    event = Base.encode64(Cloudevents.to_json(event))
     GenServer.call({:global, stream_id}, {:store, event})
   end
 
   def read(stream_id, seq) do
-    with {:ok, event} <- GenServer.call({:global, stream_id}, {:read, seq}) do
-      Base.decode64(event)
+    with {:ok, event} <- GenServer.call({:global, stream_id}, {:read, seq}),
+         {:ok, event} <- Base.decode64(event) do
+      Cloudevents.from_json(event)
     end
   end
 
