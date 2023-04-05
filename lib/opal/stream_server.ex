@@ -99,6 +99,7 @@ defmodule Opal.StreamServer do
   def handle_call({:store, event, encoded_event}, _from, %__MODULE__{} = state) do
     IO.puts(state.device, encoded_event)
 
+    event_row_offset = state.current_position
     event_row_index = state.current_rownum
 
     state =
@@ -106,7 +107,7 @@ defmodule Opal.StreamServer do
       |> Map.update!(:current_position, &(&1 + byte_size(encoded_event) + 1))
       |> Map.update!(:current_rownum, &(&1 + 1))
 
-    {:reply, :ok, state, {:continue, {:update_indices, event, event_row_index}}}
+    {:reply, :ok, state, {:continue, {:update_indices, event, event_row_index, event_row_offset}}}
   end
 
   def handle_call({:find, source, id}, _from, %__MODULE__{} = state) do
@@ -166,23 +167,25 @@ defmodule Opal.StreamServer do
       |> IO.stream(:line)
       |> Enum.reduce(state, fn encoded_event, state ->
         {:ok, last_event} = deserialize_row(encoded_event)
+
+        last_rownum = state.current_rownum
         last_offset = state.current_position
 
         state
         |> Map.update!(:current_position, &(&1 + byte_size(encoded_event) + 1))
         |> Map.update!(:current_rownum, &(&1 + 1))
-        |> update_primary_index()
+        |> update_primary_index(last_rownum, last_offset)
         |> update_secondary_indices(last_event, last_offset)
       end)
 
     {:noreply, state}
   end
 
-  def handle_continue({:update_indices, last_event, last_offset}, %__MODULE__{} = state) do
+  def handle_continue({:update_indices, last_event, last_rownum, last_offset}, %__MODULE__{} = state) do
     state =
       state
-      |> update_primary_index()
-      |> update_secondary_indices(last_event, last_offset)
+      |> update_primary_index(last_rownum, last_offset)
+      |> update_secondary_indices(last_event, last_rownum)
 
     {:noreply, state}
   end
@@ -234,10 +237,13 @@ defmodule Opal.StreamServer do
     end)
   end
 
-  defp update_primary_index(%__MODULE__{} = state) do
+  defp update_primary_index(%__MODULE__{} = state, last_rownum, last_offset) do
+    # Check the current offset to see if we pass our threshold,
+    # But index the previous row so that we can load a full indexed chunk
+    # without missing bytes at the end
     if (state.current_position - state.last_index_position) > state.index_period_bytes do
-      Map.update!(state, :primary_index, &Index.put(&1, state.current_rownum, state.current_position))
-      |> Map.put(:last_index_position, state.current_position)
+      Map.update!(state, :primary_index, &Index.put(&1, last_rownum, last_offset))
+      |> Map.put(:last_index_position, last_offset)
     else
       state
     end
