@@ -17,6 +17,7 @@ defmodule Opal.StreamServer do
     :index_period_bytes,
     :device,
     secondary_indices: [],
+    block_sizes: %{},
     last_index_position: 0,
     current_position: 0,
     current_rownum: 0,
@@ -244,6 +245,7 @@ defmodule Opal.StreamServer do
     if (state.current_position - state.last_index_position) > state.index_period_bytes do
       Map.update!(state, :primary_index, &Index.put(&1, last_rownum, last_offset))
       |> Map.put(:last_index_position, last_offset)
+      |> Map.update!(:block_sizes, &Map.put(&1, last_offset, last_offset - state.last_index_position))
     else
       state
     end
