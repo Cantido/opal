@@ -8,17 +8,14 @@ defmodule Opal.StreamServer do
   @enforce_keys [
     :stream_dir,
     :primary_index,
-    :index_period_bytes,
     :device
   ]
   defstruct [
     :stream_dir,
     :primary_index,
-    :index_period_bytes,
     :device,
     secondary_indices: [],
     block_sizes: %{},
-    last_index_position: 0,
     current_position: 0,
     current_rownum: 0,
   ]
@@ -27,8 +24,7 @@ defmodule Opal.StreamServer do
     primary_index: Opal.BTree.new(max_node_length: 1024),
     secondary_indices: %{
       [:source, :id] => Opal.BTree.new(max_node_length: 1024)
-    },
-    index_period_bytes: 100,
+    }
   ]
 
   def start_link(opts) do
@@ -46,12 +42,10 @@ defmodule Opal.StreamServer do
 
     index = Keyword.fetch!(opts, :primary_index)
 
-    index_period_bytes = Keyword.fetch!(opts, :index_period_bytes)
     {:ok, %__MODULE__{
       stream_dir: stream_dir,
       primary_index: index,
       secondary_indices: Keyword.fetch!(opts, :secondary_indices),
-      index_period_bytes: index_period_bytes,
       device: File.open!(Path.join(stream_dir, "events"), [:utf8, :read, :append])
     }, {:continue, :build_indices}}
   end
@@ -239,16 +233,7 @@ defmodule Opal.StreamServer do
   end
 
   defp update_primary_index(%__MODULE__{} = state, last_rownum, last_offset) do
-    # Check the current offset to see if we pass our threshold,
-    # But index the previous row so that we can load a full indexed chunk
-    # without missing bytes at the end
-    if (state.current_position - state.last_index_position) > state.index_period_bytes do
-      Map.update!(state, :primary_index, &Index.put(&1, last_rownum, last_offset))
-      |> Map.put(:last_index_position, last_offset)
-      |> Map.update!(:block_sizes, &Map.put(&1, last_offset, last_offset - state.last_index_position))
-    else
-      state
-    end
+    Map.update!(state, :primary_index, &Index.put(&1, last_rownum, last_offset))
   end
 
   defp update_secondary_indices(%__MODULE__{} = state, event, rownum) do
