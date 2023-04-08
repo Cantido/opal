@@ -26,6 +26,7 @@ defmodule Opal.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
+      {:avrora, "~> 0.26.0"},
       {:benchfella, "~> 0.3.0"},
       {:cloudevents, "~> 0.6.1"},
       {:uniq, "~> 0.5.4"}

@@ -6,11 +6,15 @@ defmodule Opal.StreamServer do
   require Logger
 
   @enforce_keys [
+    :avro_header,
+    :avro_header_size,
     :stream_dir,
     :primary_index,
     :device
   ]
   defstruct [
+    :avro_header,
+    :avro_header_size,
     :stream_dir,
     :primary_index,
     :device,
@@ -38,21 +42,32 @@ defmodule Opal.StreamServer do
     stream_dir = Path.join(database, stream_id)
     File.mkdir_p(stream_dir)
 
+
     opts = Keyword.merge(@default_opts, opts)
 
     index = Keyword.fetch!(opts, :primary_index)
 
+    events_file = Path.join(stream_dir, "events")
+
+    device = File.open!(events_file, [:read, :append])
+
+    {:ok, schema} = Avrora.Resolver.resolve("io.cloudevents.AvroCloudEvent")
+    {:ok, encoded_schema} = Avrora.Schema.Encoder.to_erlavro(schema)
+    header = :avro_ocf.make_header(encoded_schema)
+    header_bytes = :avro_ocf.encode_header(header)
+
     {:ok, %__MODULE__{
+      avro_header: header,
+      avro_header_size: IO.iodata_length(header_bytes),
       stream_dir: stream_dir,
       primary_index: index,
       secondary_indices: Keyword.fetch!(opts, :secondary_indices),
-      device: File.open!(Path.join(stream_dir, "events"), [:utf8, :read, :append])
+      device: device
     }, {:continue, :build_indices}}
   end
 
   def store(stream_id, event) do
-    encoded_event = Base.encode64(Cloudevents.to_json(event))
-    GenServer.call({:global, stream_id}, {:store, event, encoded_event})
+    GenServer.call({:global, stream_id}, {:store, event})
   end
 
   def read(stream_id, seq) do
@@ -91,15 +106,28 @@ defmodule Opal.StreamServer do
     {:reply, {:ok, event}, state}
   end
 
-  def handle_call({:store, event, encoded_event}, _from, %__MODULE__{} = state) do
-    IO.puts(state.device, encoded_event)
+  def handle_call({:store, event}, _from, %__MODULE__{} = state) do
+    avro_map =
+      event
+      |> Map.from_struct()
+      |> then(fn map ->
+        attributes =
+          Map.take(map, [:specversion, :source, :id, :type, :subject, :time, :datacontenttype, :dataschema])
+          |> Map.new(fn {key, val} -> {Atom.to_string(key), val} end)
+          |> Enum.into(map.extensions)
+
+        %{attribute: attributes, data: map.data}
+      end)
+    {:ok, bytes_to_write} = Avrora.encode_plain(avro_map, schema_name: "io.cloudevents.AvroCloudEvent")
+
+    :avro_ocf.append_file(state.device, state.avro_header, [bytes_to_write])
 
     event_row_offset = state.current_position
     event_row_index = state.current_rownum
 
     state =
       state
-      |> Map.update!(:current_position, &(&1 + byte_size(encoded_event) + 1))
+      |> Map.update!(:current_position, &(&1 + byte_size(bytes_to_write)))
       |> Map.update!(:current_rownum, &(&1 + 1))
 
     {:reply, :ok, state, {:continue, {:update_indices, event, event_row_index, event_row_offset}}}
@@ -124,10 +152,7 @@ defmodule Opal.StreamServer do
     matching_events =
       plan(query, state)
       |> Stream.map(fn row_index ->
-        {:ok, event} =
-          get_row(row_index, state)
-          |> deserialize_row()
-        event
+        get_row(row_index, state)
       end)
       |> Stream.filter(fn event ->
         Enum.all?(query, fn {key, value} ->
@@ -156,23 +181,45 @@ defmodule Opal.StreamServer do
     {:reply, metrics, state}
   end
 
+  def handle_continue(:load_database, %__MODULE__{} = state) do
+    events_file = Path.join(state.stream_dir, "events")
+    events_file_stats = File.stat!(events_file)
+
+    if events_file_stats.size == 0 do
+      :ok = :avro_ocf.write_header(state.device, state.avro_header)
+      {:ok, _file_position} = :file.position(state.device, :eof)
+    end
+
+    {:ok, file_position} = :file.position(state.device, :eof)
+
+    state = %__MODULE__{state | current_position: file_position}
+
+    {:noreply, state}
+  end
+
   def handle_continue(:build_indices, %__MODULE__{} = state) do
-    state =
-      state.device
-      |> IO.stream(:line)
-      |> Enum.reduce(state, fn encoded_event, state ->
-        {:ok, last_event} = deserialize_row(encoded_event)
+    # events_file = Path.join(state.stream_dir, "events")
 
-        last_rownum = state.current_rownum
-        last_offset = state.current_position
+    # stats = File.stat!(events_file)
 
-        state
-        |> Map.update!(:current_position, &(&1 + byte_size(encoded_event) + 1))
-        |> Map.update!(:current_rownum, &(&1 + 1))
-        |> update_primary_index(last_rownum, last_offset)
-        |> update_secondary_indices(last_event, last_offset)
-      end)
 
+    # if stats.size > 0 do
+    #   {_header, _type, rows} = :avro_ocf.decode_file(events_file)
+
+    #   Enum.reduce(rows, state, fn last_event, state ->
+    #     last_rownum = state.current_rownum
+    #     last_offset = state.current_position
+
+    #     state
+    #     |> Map.update!(:current_position, &(&1 + byte_size(encoded_event) + 1))
+    #     |> Map.update!(:current_rownum, &(&1 + 1))
+    #     |> update_primary_index(last_rownum, last_offset)
+    #     |> update_secondary_indices(last_event, last_offset)
+    #   end)
+    #   {:noreply, state}
+    # else
+    #   {:noreply, state}
+    # end
     {:noreply, state}
   end
 
@@ -208,17 +255,13 @@ defmodule Opal.StreamServer do
   end
 
   defp get_row(rownum, state) do
-    {indexed_rownum, indexed_offset} =
-      case Index.get_closest_before(state.primary_index, rownum) do
-        nil -> {0, 0}
-        val -> val
-      end
-
-    {:ok, _newpos} = :file.position(state.device, indexed_offset)
-
-    state.device
-    |> IO.stream(:line)
-    |> Enum.at(rownum - indexed_rownum)
+    with row_binary when is_binary(row_binary) <- Opal.Avro.ocf_object_at(state.device, rownum),
+         {:ok, row} = Avrora.decode_plain(row_binary, schema_name: "io.cloudevents.AvroCloudEvent") do
+      row
+    else
+      :eof -> :eof
+      err -> err
+    end
   end
 
   # Returns all indices whose attributes are all requested in the query.

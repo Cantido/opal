@@ -6,6 +6,7 @@ defmodule Opal.Application do
   @impl true
   def start(_type, _args) do
     children = [
+      Avrora,
       {DynamicSupervisor, name: Opal.StreamServerSupervisor}
     ]
 
